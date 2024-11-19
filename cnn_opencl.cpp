@@ -111,8 +111,8 @@ void convolution_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs,
 	err = clSetKernelArg(kernel, 5, sizeof(int), &nbyn);
 	CHECK_ERROR(err);
 
-	size_t global_work_size[3] = { nbyn, nbyn, output_dim };
-	err = clEnqueueNDRangeKernel(queue, kernel, 3, NULL, global_work_size, NULL, 0, NULL, NULL);
+	size_t global_work_size[2] = { nbyn*nbyn, output_dim };
+	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
 	CHECK_ERROR(err);
 }
 
@@ -372,7 +372,7 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	CHECK_ERROR(err);
 	err = clReleaseKernel(pooling_kernel);
 	CHECK_ERROR(err);
-	err = clReleaseKernel(fc_kernel);
+	err = clReleaseKernel(fc_kernel); 
 	CHECK_ERROR(err);
 	err = clReleaseProgram(program);
 	CHECK_ERROR(err);
