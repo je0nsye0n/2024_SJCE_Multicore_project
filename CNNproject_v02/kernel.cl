@@ -122,3 +122,54 @@ __kernel void conv_lm_kernel (
     
     outputs[(outNeuron * offset) + (row * nbyn) + col] = fmax(sum + biases[outNeuron], 0.0f);
 }
+
+__kernel void conv_lm1_kernel ( 
+    __global float *inputs,
+    __global float *outputs,
+    __global float *filter,
+    __global float *biases,
+    const int inDim,
+    const int nbyn
+) {
+    const int row = get_global_id(0);
+    const int col = get_global_id(1);
+    const int outNeuron = get_global_id(2);
+    
+    const int l_ch = get_local_id(2); 
+    const int wgSize = get_local_size(2); 
+    __local float l_input[3][3][32];
+    
+    const int offset = nbyn * nbyn;
+	int i, j, inNeuron, inputOffset, filterOffset, fRow, fCol, x, y;
+    
+    float sum = 0.0f;
+    for (i = 0; i < inDim; i += wgSize) {
+        inNeuron = i + l_ch;
+        
+        inputOffset = inNeuron * offset;
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+        for (int fRow = 0; fRow < 3; ++fRow) {
+			for (int fCol = 0; fCol < 3; ++fCol) {
+		        int x = col + fCol - 1;
+	            int y = row + fRow - 1;
+                if (x >= 0 && x < nbyn && y >= 0 && y < nbyn)
+					l_input[fRow][fCol][l_ch] = inputs[inputOffset + nbyn * y + x];
+				else
+			        l_input[fRow][fCol][l_ch] = 0.0f;
+	        }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        
+        for (j = 0; j < wgSize; ++j) {
+			filterOffset = (outNeuron * inDim + i + j) * 9;
+			for (fRow = 0; fRow < 3; ++fRow) {
+		        for (fCol = 0; fCol < 3; ++fCol) {
+	                sum += l_input[fRow][fCol][j] * filter[filterOffset + fRow * 3 + fCol];
+				}
+			}
+        }
+    }
+    
+    outputs[(outNeuron * offset) + (row * nbyn) + col] = fmax(sum + biases[outNeuron], 0.0f);
+}
