@@ -15,7 +15,7 @@ __kernel void im2col(
     int inputOffset, outputOffset, x, y, fRow, fCol;
 
     inputOffset = batch_idx * inDim * nbyn * nbyn + inNeuron * nbyn * nbyn;
-    outputOffset = batch_idx * inDim * nbyn * nbyn * 9 + inNeuron * nbyn * nbyn * 9 + row * nbyn * 9 + col * 9;
+    outputOffset = batch_idx * inDim * nbyn * nbyn * 9 + (row * nbyn + col) * 9 * inDim + inNeuron * 9;
     for (fRow = 0; fRow < 3; ++fRow) {
         for (fCol = 0; fCol < 3; ++fCol) {
             x = col + fCol - 1;
@@ -47,17 +47,13 @@ __kernel void conv_kernel(
     const int row = (flat_idx % (nbyn * nbyn)) / nbyn;
     const int col = flat_idx % nbyn;
 
-    int inputOffset = batch_idx * inDim * nbyn * nbyn * 9 + row * nbyn * 9 + col * 9;
+    int inputOffset = batch_idx * inDim * nbyn * nbyn * 9 + (row * nbyn + col) * 9 * inDim;
     int filterOffset = outNeuron * inDim * 9;
 
 
     float sum = 0.0f;
-    for (int c = 0; c < inDim; ++c) {
-        for (int i = 0; i < 9; ++i) {
-            int inputIdx = inputOffset + c * nbyn * nbyn * 9 + i;
-            int filterIdx = filterOffset + c * 9 + i;
-            sum += inputs[inputIdx] * filter[filterIdx];
-        }
+    for (int i = 0; i < inDim * 9; ++i) {
+        sum += inputs[inputOffset + i] * filter[filterOffset + i];
     }
 
     outputs[batch_idx * outDim * nbyn * nbyn + (outNeuron * nbyn * nbyn) + (row * nbyn) + col] = fmax(sum + biases[outNeuron], 0.0f);
