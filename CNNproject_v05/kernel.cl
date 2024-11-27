@@ -74,9 +74,11 @@ __kernel void fc_kernel(
     const int batch_idx = get_global_id(1);
     const int outNeuron = get_global_id(0);
 
-    float sum = 0.0f;
+    float sum = 0.0f, tmp;
     for (int inNeuron = 0; inNeuron < inDim; ++inNeuron) {
-        sum += inputs[batch_idx * inDim + inNeuron] * weights[outNeuron * inDim + inNeuron];
+        tmp = inputs[batch_idx * inDim + inNeuron];
+        if(tmp != 0)
+            sum += tmp * weights[outNeuron * inDim + inNeuron];
     }
 
     outputs[batch_idx * outputDim + outNeuron] = fmax(sum + biases[outNeuron], 0.0f);
