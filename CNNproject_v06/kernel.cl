@@ -87,11 +87,17 @@ __kernel void fc_kernel(
     const int batch_idx = get_global_id(1);
     const int outNeuron = get_global_id(0);
 
-    float sum = 0.0f, tmp;
-    for (int inNeuron = 0; inNeuron < inDim; ++inNeuron) {
-        tmp = inputs[batch_idx * inDim + inNeuron];
-        if(tmp != 0)
-            sum += tmp * weights[outNeuron * inDim + inNeuron];
+    float sum = 0.0f;
+    
+    float4 inputVec, weightVec;
+    
+    const int inputOffset = batch_idx * inDim;
+    const int weightOffset = outNeuron * inDim;
+
+    for (int inNeuron = 0; inNeuron < inDim / 4; ++inNeuron) {
+        inputVec = vload4(inNeuron, inputs + inputOffset);
+        weightVec = vload4(inNeuron, weights + weightOffset);
+        sum += dot(inputVec, weightVec);
     }
 
     outputs[batch_idx * outputDim + outNeuron] = fmax(sum + biases[outNeuron], 0.0f);
@@ -124,6 +130,7 @@ __kernel void conv_tile_kernel(
     int inputOffset, filterOffset, x, y, inNeuron, fRow, i, j, k;
 
     filterOffset = outNeuron * inDim * 9;
+    float3 filterVec;
 
     for (i = 0; i < inDim; i += wgSize) {
         inNeuron = i + l_c;
@@ -131,16 +138,17 @@ __kernel void conv_tile_kernel(
         inputOffset = batch_idx * inDim * nbyn * nbyn + inNeuron * nbyn * nbyn;
 
         for (fRow = 0; fRow < 3; ++fRow) {
+            x = col - 1;
             y = row + fRow - 1;
 
             if (y >= 0 && y < nbyn) {
                 l_inputVec[l_spatial_idx * 3 * wgSize + l_c * 3 + fRow] = (float3)(
-                    (col - 1 >= 0 && col - 1 < nbyn) ? inputs[inputOffset + y * nbyn + (col - 1)] : 0.0f,
-                    (col >= 0 && col < nbyn) ? inputs[inputOffset + y * nbyn + col] : 0.0f,
-                    (col + 1 >= 0 && col + 1 < nbyn) ? inputs[inputOffset + y * nbyn + (col + 1)] : 0.0f
+                    (x >= 0 && x < nbyn) ? inputs[inputOffset + y * nbyn + x] : 0.0f,
+                    (x + 1 >= 0 && x + 1 < nbyn) ? inputs[inputOffset + y * nbyn + x + 1] : 0.0f,
+                    (x + 2 >= 0 && x + 2 < nbyn) ? inputs[inputOffset + y * nbyn + x + 2] : 0.0f
                 );
             } else {
-                l_inputVec[l_spatial_idx * 3 * wgSize + l_c * 3 + fRow] = (float3)(0.0f, 0.0f, 0.0f);
+                l_inputVec[l_spatial_idx * 3 * wgSize + l_c * 3 + fRow] = (float3)(0.0f, 0.0f, 0.0f); 
             }
         }
 
@@ -150,7 +158,7 @@ __kernel void conv_tile_kernel(
             int filterIdx = filterOffset + (i + j) * 9;
 
             for(k = 0; k < 3; ++k){
-                float3 filterVec= vload3(0, filter + filterIdx + k * 3);
+                filterVec = vload3(0, filter + filterIdx + k * 3);
                 sum += dot(l_inputVec[l_spatial_idx * 3 * wgSize + j * 3 + k], filterVec);
             }
         }
