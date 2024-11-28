@@ -34,6 +34,11 @@ __kernel void conv_kernel(
                     (x + 1 >= 0 && x + 1 < nbyn) ? inputs[inputOffset + y * nbyn + x + 1] : 0.0f,
                     (x + 2 >= 0 && x + 2 < nbyn) ? inputs[inputOffset + y * nbyn + x + 2] : 0.0f
                 );
+            } else {
+                inputVec = (float3)(0.0f, 0.0f, 0.0f);
+            }
+
+            if(!all(inputVec == 0)) {
                 filterVec = vload3(fRow, filter + filterOffset);
                 sum += dot(inputVec, filterVec);
             }
