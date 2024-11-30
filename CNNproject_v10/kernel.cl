@@ -82,15 +82,13 @@ __kernel void conv1_kernel(
             for (fCol = 0; fCol < 3; ++fCol) {
                 x = col + fCol - 1;
                 y = row + fRow - 1;
-                if (x >= 0 && x < nbyn && y >= 0 && y < nbyn) {
-                    l_x = l_col + fCol - 1;
-                    l_y = l_row + fRow - 1;
-                    if (l_x >= 0 && l_x < nbyn && l_y >= 0 && l_y < l_maxRow) {
-                        sum += l_inputs[l_y * nbyn + l_x] * l_filter[3 * fRow + fCol];
-                    }
-                    else {
-                        sum += inputs[inputOffset + y * nbyn + x] * l_filter[3 * fRow + fCol];
-                    }
+                l_x = l_col + fCol - 1;
+                l_y = l_row + fRow - 1;
+                if (x >= 0 && x < nbyn && y >= 0 && y < nbyn && l_x >= 0 && l_x < nbyn && l_y >= 0 && l_y < l_maxRow) {
+                    sum += l_inputs[l_y * nbyn + l_x] * l_filter[3 * fRow + fCol];
+                }
+                else if (x >= 0 && x < nbyn && y >= 0 && y < nbyn && l_x >= 0) {
+                    sum += inputs[inputOffset + y * nbyn + x] * l_filter[3 * fRow + fCol];
                 }
             }
         }
