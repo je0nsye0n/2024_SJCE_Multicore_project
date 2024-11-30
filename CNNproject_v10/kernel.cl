@@ -64,7 +64,7 @@ __kernel void conv1_kernel(
     __local float l_filter[9];
 
     int inputOffset, filterOffset, x, y, l_x, l_y, inNeuron, fRow, fCol;
-    float sum, tmp;
+    float sum;
 
     sum = 0.0f;
     for (inNeuron = 0; inNeuron < inDim; ++inNeuron) {
@@ -85,13 +85,10 @@ __kernel void conv1_kernel(
                     l_x = l_col + fCol - 1;
                     l_y = l_row + fRow - 1;
                     if (l_x >= 0 && l_x < nbyn && l_y >= 0 && l_y < l_maxRow) {
-                        tmp = l_inputs[l_y * nbyn + l_x];
+                        sum += l_inputs[l_y * nbyn + l_x] * l_filter[3 * fRow + fCol];
                     }
                     else {
-                        tmp = inputs[inputOffset + y * nbyn + x];
-                    }
-                    if(tmp != 0) {
-                        sum += tmp * l_filter[3 * fRow + fCol];
+                        sum += inputs[inputOffset + y * nbyn + x] * l_filter[3 * fRow + fCol];
                     }
                 }
             }
@@ -124,7 +121,7 @@ __kernel void conv2_kernel(
     __local float l_filter[9];
 
     int inputOffset, filterOffset, x, y, inNeuron, fRow, fCol;
-    float sum, tmp;
+    float sum;
 
     sum = 0.0f;
     for (inNeuron = 0; inNeuron < inDim; ++inNeuron) {
@@ -142,10 +139,7 @@ __kernel void conv2_kernel(
                 x = col + fCol - 1;
                 y = row + fRow - 1;
                 if (x >= 0 && x < nbyn && y >= 0 && y < nbyn) {
-                    tmp = l_inputs[y * nbyn + x];
-                    if(tmp != 0) {
-                        sum += tmp * l_filter[fRow * 3 + fCol];
-                    }
+                    sum += l_inputs[y * nbyn + x] * l_filter[fRow * 3 + fCol];
                 }
             }
         }
