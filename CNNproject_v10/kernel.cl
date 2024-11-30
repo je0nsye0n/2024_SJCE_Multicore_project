@@ -56,9 +56,10 @@ __kernel void conv1_kernel(
     const int col = spatialIdx % nbyn;
 
     const int l_spatialIdx = get_local_id(0);
+    const int l_size = get_local_id(0);
     const int l_row = l_spatialIdx / nbyn;
     const int l_col = l_spatialIdx % nbyn;
-    const int l_maxRow = 64 / nbyn; 
+    const int l_maxRow = l_size / nbyn; 
 
     __local float l_inputs[64];
     __local float l_filter[9];
@@ -168,9 +169,10 @@ __kernel void conv3_kernel(
     const int col = spatialIdx % nbyn;
 
     const int l_flatIdx = get_local_id(0);
+    const int l_size = get_local_size(0);
     const int l_inNeuron = l_flatIdx / featureMapSize;
     const int l_spatialIdx = l_flatIdx % featureMapSize;
-    const int l_channel = 64 / featureMapSize;
+    const int l_channel = l_size / featureMapSize;
 
     __local float l_inputs[64];
 
