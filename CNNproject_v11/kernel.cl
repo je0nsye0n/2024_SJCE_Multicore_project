@@ -38,14 +38,14 @@ __kernel void conv_kernel(
 					filterVec = vload3(fRow, filter + filterOffset);
 					sum = fma(inputVec, filterVec, sum);
 				}
-			}	
+			}
 		}
 	}
 
 	outputs[(batchIdx * outDim + outNeuron) * nbyn * nbyn + spatialIdx] = fmax(sum.x + sum.y + sum.z + biases[outNeuron], 0.0f);
 }
 
-__kernel void conv3_kernel(
+__kernel void conv_tile_kernel(
 	__global float* inputs,
 	__global float* outputs,
 	__global float* filter,
@@ -69,7 +69,7 @@ __kernel void conv3_kernel(
 	const int l_spatialIdx = l_flatIdx % featureMapSize;
 	const int l_channel = l_size / featureMapSize;
 
-	__local float l_inputs[64];
+	__local float l_inputs[256];
 
 	int inputOffset, filterOffset, x, y, inNeuron, fRow, fCol;
 
