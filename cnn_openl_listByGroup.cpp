@@ -555,12 +555,6 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
                 INPUT_DIM[20], OUTPUT_DIM[20], current_batch_size,
                 NULL, &conv_event);
 
-
-            //err = clEnqueueReadBuffer(queue, layerBuf[20], CL_FALSE, 0,
-                //sizeof(float) * OUTPUT_DIM[20] * NBYN[20] * NBYN[20] * current_batch_size,
-                //outputLayer, 1, &conv_event[15], &read_event);
-            //CHECK_ERROR(err);
-
             save_layer(save_queue, save_kernel, &layerBuf[20], &labels[i], &confidences[i], current_batch_size, &conv_event, &save_event);
 
         }
@@ -572,11 +566,13 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
             CHECK_ERROR(err);
             clReleaseEvent(pool_event[0]);
 
-
+            clWaitForEvents(1, &write_event);
+            
             convolution_layer(cnn_queue_list[0], conv_kernel, &imageBuf, &layerBuf[0], &wBuf[0], &bBuf[0],
                 INPUT_DIM[0], OUTPUT_DIM[0], NBYN[0], current_batch_size,
                 &pool_event[1], NULL);
             clReleaseEvent(pool_event[1]);
+            clReleaseEvent(write_event);
 
             convolution_layer(cnn_queue_list[0], conv_kernel, &layerBuf[0], &layerBuf[1], &wBuf[1], &bBuf[1],
                 INPUT_DIM[1], OUTPUT_DIM[1], NBYN[1], current_batch_size,
@@ -671,24 +667,8 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
                 INPUT_DIM[20], OUTPUT_DIM[20], current_batch_size,
                 NULL, &conv_event);
 
-            //err = clEnqueueReadBuffer(queue, layerBuf[20], CL_FALSE, 0,
-            //    sizeof(float) * OUTPUT_DIM[20] * NBYN[20] * NBYN[20] * current_batch_size,
-            //    outputLayer, 1, &conv_event[15], &read_event);
-            //CHECK_ERROR(err);
-
             save_layer(save_queue, save_kernel, &layerBuf[20], &labels[i], &confidences[i], current_batch_size, &conv_event, &save_event);
         }
-
-
-        //for (int b = 0; b < current_batch_size; ++b) {
-            //softmax(outputLayer + b * 10, 10);    
-            //labels[i + b] = find_max(outputLayer + b * 10, 10);
-            //confidences[i + b] = outputLayer[b * 10 + labels[i + b]];
-            // => 커널 변경?
-        //}
-
-        //clWaitForEvents(1, &output_event);
-        //clReleaseEvent(conv_event[1]);
 
     }
     end = clock();
