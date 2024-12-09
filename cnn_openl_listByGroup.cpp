@@ -653,7 +653,7 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
                 NULL, &pool_event[4]);
 
 
-
+            clWaitForEvents(1, &pool_event[4]);
             fully_connected_layer(cnn_queue_list[5], fc_kernel, &layerBuf[17], &layerBuf[18], &wBuf[18], &bBuf[18],
                 INPUT_DIM[18], OUTPUT_DIM[18], current_batch_size,
                 &save_event, NULL);
