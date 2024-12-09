@@ -62,7 +62,7 @@ void build_error(cl_program program, cl_device_id device, cl_int err) {
     };
 }
 
-void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* save_queue, cl_command_queue* read_queue, cl_command_queue* cnn_queue, cl_command_queue* cnn_queue_list,cl_program* program ) {
+void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* save_queue, cl_command_queue* read_queue, cl_command_queue* cnn_queue, cl_command_queue* cnn_queue_list, cl_program* program) {
     cl_int err;
 
     // Platform ID
@@ -85,7 +85,7 @@ void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* sa
     *cnn_queue = clCreateCommandQueueWithProperties(*context, device, 0, &err);
     *save_queue = clCreateCommandQueueWithProperties(*context, device, 0, &err);
     for (int i = 0; i < 6; i++) {
-        *(cnn_queue_list+i) = clCreateCommandQueueWithProperties(*context, device, 0, &err);
+        *(cnn_queue_list + i) = clCreateCommandQueueWithProperties(*context, device, 0, &err);
     }
     CHECK_ERROR(err);
 
@@ -262,7 +262,7 @@ void save_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs, int* l
     CHECK_ERROR(err);
     err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &confidences_buf);
     CHECK_ERROR(err);
-    
+
     size_t global_work_size = batch_size;
     int cnt = 1;
     if (before == NULL) cnt = 0;
@@ -385,7 +385,7 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
     cl_int err;
 
     cl_program program;
-    cnn_init(&context, &queue, &save_queue,&read_queue,&cnn_queue,cnn_queue_list,&program);
+    cnn_init(&context, &queue, &save_queue, &read_queue, &cnn_queue, cnn_queue_list, &program);
 
     cl_kernel conv_kernel = clCreateKernel(program, "conv_kernel", &err);
     CHECK_ERROR(err);
@@ -461,6 +461,7 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
                 images + i * 32 * 32 * 3, 0, NULL, &write_event);
             CHECK_ERROR(err);
 
+
             convolution_layer(cnn_queue_list[0], conv_kernel, &imageBuf, &layerBuf[0], &wBuf[0], &bBuf[0],
                 INPUT_DIM[0], OUTPUT_DIM[0], NBYN[0], current_batch_size,
                 &write_event, NULL);
@@ -527,7 +528,7 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 
             convolution_layer(cnn_queue_list[4], conv_kernel, &layerBuf[13], &layerBuf[14], &wBuf[14], &bBuf[14],
                 INPUT_DIM[14], OUTPUT_DIM[14], NBYN[14], current_batch_size,
-                &pool_event[3],NULL);
+                &pool_event[3], NULL);
 
             convolution_layer(cnn_queue_list[4], conv_kernel, &layerBuf[14], &layerBuf[15], &wBuf[15], &bBuf[15],
                 INPUT_DIM[15], OUTPUT_DIM[15], NBYN[15], current_batch_size,
@@ -571,10 +572,11 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
             CHECK_ERROR(err);
             clReleaseEvent(pool_event[0]);
 
+
             convolution_layer(cnn_queue_list[0], conv_kernel, &imageBuf, &layerBuf[0], &wBuf[0], &bBuf[0],
                 INPUT_DIM[0], OUTPUT_DIM[0], NBYN[0], current_batch_size,
                 &pool_event[1], NULL);
-            clReleaseEvent(pool_event[0]);
+            clReleaseEvent(pool_event[1]);
 
             convolution_layer(cnn_queue_list[0], conv_kernel, &layerBuf[0], &layerBuf[1], &wBuf[1], &bBuf[1],
                 INPUT_DIM[1], OUTPUT_DIM[1], NBYN[1], current_batch_size,
@@ -588,8 +590,8 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 
             convolution_layer(cnn_queue_list[1], conv_kernel, &layerBuf[2], &layerBuf[3], &wBuf[3], &bBuf[3],
                 INPUT_DIM[3], OUTPUT_DIM[3], NBYN[3], current_batch_size,
-                &pool_event[1], NULL);
-            clReleaseEvent(pool_event[1]);
+                &pool_event[2], NULL);
+            clReleaseEvent(pool_event[2]);
 
             convolution_layer(cnn_queue_list[1], conv_kernel, &layerBuf[3], &layerBuf[4], &wBuf[4], &bBuf[4],
                 INPUT_DIM[4], OUTPUT_DIM[4], NBYN[4], current_batch_size,
@@ -599,10 +601,12 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
                 INPUT_DIM[5], NBYN[5], current_batch_size,
                 NULL, &pool_event[1]);
 
+
+
             convolution_layer(cnn_queue_list[2], conv_kernel, &layerBuf[5], &layerBuf[6], &wBuf[6], &bBuf[6],
                 INPUT_DIM[6], OUTPUT_DIM[6], NBYN[6], current_batch_size,
-                &pool_event[2],NULL);
-            clReleaseEvent(pool_event[2]);
+                &pool_event[3], NULL);
+            clReleaseEvent(pool_event[3]);
 
             convolution_layer(cnn_queue_list[2], conv_kernel, &layerBuf[6], &layerBuf[7], &wBuf[7], &bBuf[7],
                 INPUT_DIM[7], OUTPUT_DIM[7], NBYN[7], current_batch_size,
@@ -619,8 +623,8 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 
             convolution_layer(cnn_queue_list[3], conv_kernel, &layerBuf[9], &layerBuf[10], &wBuf[10], &bBuf[10],
                 INPUT_DIM[10], OUTPUT_DIM[10], NBYN[10], current_batch_size,
-                &pool_event[3], NULL);
-            clReleaseEvent(pool_event[3]);
+                &pool_event[4], NULL);
+            clReleaseEvent(pool_event[4]);
 
             convolution_layer(cnn_queue_list[3], conv_kernel, &layerBuf[10], &layerBuf[11], &wBuf[11], &bBuf[11],
                 INPUT_DIM[11], OUTPUT_DIM[11], NBYN[11], current_batch_size,
@@ -637,8 +641,8 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 
             convolution_layer(cnn_queue_list[4], conv_kernel, &layerBuf[13], &layerBuf[14], &wBuf[14], &bBuf[14],
                 INPUT_DIM[14], OUTPUT_DIM[14], NBYN[14], current_batch_size,
-                &pool_event[4], NULL);
-            clReleaseEvent(pool_event[4]);
+                &conv_event, NULL);
+            clReleaseEvent(conv_event);
 
             convolution_layer(cnn_queue_list[4], conv_kernel, &layerBuf[14], &layerBuf[15], &wBuf[15], &bBuf[15],
                 INPUT_DIM[15], OUTPUT_DIM[15], NBYN[15], current_batch_size,
@@ -652,10 +656,12 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
                 INPUT_DIM[17], NBYN[17], current_batch_size,
                 NULL, &pool_event[4]);
 
+
+
             fully_connected_layer(cnn_queue_list[5], fc_kernel, &layerBuf[17], &layerBuf[18], &wBuf[18], &bBuf[18],
                 INPUT_DIM[18], OUTPUT_DIM[18], current_batch_size,
-                &conv_event, NULL);
-            clReleaseEvent(conv_event);
+                &save_event, NULL);
+            clReleaseEvent(save_event);
 
             fully_connected_layer(cnn_queue_list[5], fc_kernel, &layerBuf[18], &layerBuf[19], &wBuf[19], &bBuf[19],
                 INPUT_DIM[19], OUTPUT_DIM[19], current_batch_size,
