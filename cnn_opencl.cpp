@@ -115,7 +115,7 @@ void convolution_layer(cl_command_queue queue, cl_kernel conv_kernel,
 	}
 	else {
 		size_t global_work_size[2] = { nbyn * nbyn * output_dim, batch_size };
-		size_t local_work_size[2] = { 128, 1 };
+		size_t local_work_size[2] = { 256, 1 };
 		err = clEnqueueNDRangeKernel(queue, conv_kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
 		CHECK_ERROR(err);
 	}
@@ -141,7 +141,7 @@ void max_pooling_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs,
 }
 
 void fully_connected_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs, cl_mem* outputs, cl_mem* weights, cl_mem* biases,
-	int input_dim, int output_dim, int batch_size)
+	int input_dim, int output_dim, int batch_size, int offset)
 {
 	cl_int err;
 
@@ -157,10 +157,11 @@ void fully_connected_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inp
 	CHECK_ERROR(err);
 	err = clSetKernelArg(kernel, 5, sizeof(int), &output_dim);
 	CHECK_ERROR(err);
+	err = clSetKernelArg(kernel, 6, sizeof(int), &offset);
+	CHECK_ERROR(err);
 
-	size_t global_work_size[2] = { output_dim*64, batch_size };
-	size_t local_size[2] = { 64,1 };
-	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, local_size, 0, NULL, NULL);
+	size_t global_work_size[2] = { output_dim, batch_size };
+	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
 	CHECK_ERROR(err);
 }
 
@@ -276,6 +277,8 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	CHECK_ERROR(err);
 	cl_kernel fc_kernel = clCreateKernel(program, "fc_kernel", &err);
 	CHECK_ERROR(err);
+	cl_kernel softmax_kernel = clCreateKernel(program, "softmax_kernel", &err);
+	CHECK_ERROR(err);
 
 	time_t start, end;
 	start = clock();
@@ -314,12 +317,14 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	}
 
 	cl_mem layerBuf[21];
-	for (int i = 0; i < 21; ++i) {
+	for (int i = 0; i < 20; ++i) {
 		layerBuf[i] = clCreateBuffer(context, CL_MEM_READ_WRITE, batch_size * sizeof(float) * OUTPUT_DIM[i] * NBYN[i] * NBYN[i], NULL, &err);
 		CHECK_ERROR(err);
 	}
+	layerBuf[20] = clCreateBuffer(context, CL_MEM_READ_WRITE, batch_size * sizeof(float) * OUTPUT_DIM[20] * NBYN[20] * NBYN[20] * 3000, NULL, &err);
+	CHECK_ERROR(err);
 
-	float* outputLayer = (float*)malloc(sizeof(float) * OUTPUT_DIM[20] * NBYN[20] * NBYN[20] * batch_size);
+	float* outputLayer = (float*)malloc(sizeof(float) * OUTPUT_DIM[20] * NBYN[20] * NBYN[20] * 3000);
 	if (outputLayer == NULL)
 		perror("malloc error");
 
@@ -356,19 +361,29 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 		convolution_layer(queue, conv_tile_kernel, &layerBuf[15], &layerBuf[16], &wBuf[16], &bBuf[16], INPUT_DIM[16], OUTPUT_DIM[16], NBYN[16], current_batch_size);
 		max_pooling_layer(queue, pooling_kernel, &layerBuf[16], &layerBuf[17], INPUT_DIM[17], NBYN[17], current_batch_size);
 
-		fully_connected_layer(queue, fc_kernel, &layerBuf[17], &layerBuf[18], &wBuf[18], &bBuf[18], INPUT_DIM[18], OUTPUT_DIM[18], current_batch_size);
-		fully_connected_layer(queue, fc_kernel, &layerBuf[18], &layerBuf[19], &wBuf[19], &bBuf[19], INPUT_DIM[19], OUTPUT_DIM[19], current_batch_size);
-		fully_connected_layer(queue, fc_kernel, &layerBuf[19], &layerBuf[20], &wBuf[20], &bBuf[20], INPUT_DIM[20], OUTPUT_DIM[20], current_batch_size);
-
-		err = clEnqueueReadBuffer(queue, layerBuf[20], CL_TRUE, 0, sizeof(float) * OUTPUT_DIM[20] * NBYN[20] * NBYN[20] * current_batch_size, outputLayer, 0, NULL, NULL);
-		CHECK_ERROR(err);
-
-		for (int b = 0; b < current_batch_size; ++b) {
-			softmax(outputLayer + b * 10, 10);
-			labels[i + b] = find_max(outputLayer + b * 10, 10);
-			confidences[i + b] = outputLayer[b * 10 + labels[i + b]];
-		}
+		fully_connected_layer(queue, fc_kernel, &layerBuf[17], &layerBuf[18], &wBuf[18], &bBuf[18], INPUT_DIM[18], OUTPUT_DIM[18], current_batch_size, 0);
+		fully_connected_layer(queue, fc_kernel, &layerBuf[18], &layerBuf[19], &wBuf[19], &bBuf[19], INPUT_DIM[19], OUTPUT_DIM[19], current_batch_size, 0);
+		fully_connected_layer(queue, fc_kernel, &layerBuf[19], &layerBuf[20], &wBuf[20], &bBuf[20], INPUT_DIM[20], OUTPUT_DIM[20], current_batch_size, i);
 	}
+	cl_mem tempBuf2 = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * 3000, NULL, &err);
+	CHECK_ERROR(err);
+	cl_mem tempBuf3 = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * 3000, NULL, &err);
+	CHECK_ERROR(err);
+
+
+	err = clSetKernelArg(softmax_kernel, 0, sizeof(cl_mem), &layerBuf[20]);
+	CHECK_ERROR(err);
+	err = clSetKernelArg(softmax_kernel, 1, sizeof(cl_mem), &tempBuf2);
+	CHECK_ERROR(err);
+	err = clSetKernelArg(softmax_kernel, 2, sizeof(cl_mem), &tempBuf3);
+	CHECK_ERROR(err);
+	size_t global_work_size = 3000;
+	err = clEnqueueNDRangeKernel(queue, softmax_kernel, 1, NULL, &global_work_size, NULL, 0, NULL, NULL);
+	CHECK_ERROR(err);
+	err = clEnqueueReadBuffer(queue, tempBuf2, CL_TRUE, 0, sizeof(float) * 3000, confidences, 0, NULL, NULL);
+	CHECK_ERROR(err);
+	err = clEnqueueReadBuffer(queue, tempBuf3, CL_TRUE, 0, sizeof(int) * 3000, labels, 0, NULL, NULL);
+	CHECK_ERROR(err);
 
 	end = clock();
 	printf("Elapsed time: %.2f sec\n", (double)(end - start) / CLK_TCK);
@@ -402,3 +417,5 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	CHECK_ERROR(err);
 	free(outputLayer);
 }
+
+

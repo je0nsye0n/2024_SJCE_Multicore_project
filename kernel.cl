@@ -1,3 +1,4 @@
+
 __kernel void conv_kernel(
 	__global float* inputs,
 	__global float* outputs,
@@ -140,34 +141,62 @@ __kernel void pooling_kernel(
 	outputs[(batchIdx * outDim + outNeuron) * featureMapSize + spatialIdx] = maxVal;
 }
 
-#define FC_BLOCK_SIZE 64
 __kernel void fc_kernel(
 	__global float* inputs,
 	__global float* outputs,
 	__global float* weights,
 	__global float* biases,
 	const int inDim,
-	const int outDim
+	const int outDim,
+	const int offset
 ) {
-	const int batchIdx = get_group_id(1), outNeuron = get_group_id(0);
-	const int tileIdx = get_local_id(0);
-	weights += outNeuron * inDim, inputs += batchIdx * inDim;
-	float sum = 0.0f;
+	const int outNeuron = get_global_id(0);
+	const int batchIdx = get_global_id(1);
 
-	for (int i = tileIdx; i < inDim; i += FC_BLOCK_SIZE) {
-		sum += inputs[i] * weights[i];
-	}
+	const int inputOffset = batchIdx * inDim;
+	const int weightOffset = outNeuron * inDim;
 
-	__local float l_sum[FC_BLOCK_SIZE];
-	l_sum[tileIdx] = sum;
-	barrier(CLK_LOCAL_MEM_FENCE);
+	float sum, tmp;
 
-	for (int i = FC_BLOCK_SIZE / 2; i > 0; i /= 2) {
-		if (tileIdx < i) {
-			l_sum[tileIdx] += l_sum[tileIdx + i];
+	sum = 0.0f;
+	for (int inNeuron = 0; inNeuron < inDim; ++inNeuron) {
+		tmp = inputs[inputOffset + inNeuron];
+		if (tmp != 0) {
+			sum += tmp * weights[weightOffset + inNeuron];
 		}
-		barrier(CLK_LOCAL_MEM_FENCE);
 	}
 
-	if (tileIdx == 0) outputs[batchIdx * outDim + outNeuron] = max(l_sum[0] + biases[outNeuron], 0.0f);
+	outputs[offset * 10 + batchIdx * outDim + outNeuron] = fmax(sum + biases[outNeuron], 0.0f);
+}
+
+__kernel void softmax_kernel(
+	__global float* inputs,
+	__global float* outputs1,
+	__global int* outputs2
+) {
+	const int id = get_global_id(0);
+	int i, maxIdx = 0;
+	
+	float input[10];
+	for (i = 0; i < 10; i++) {
+		input[i] = inputs[id * 10 + i];
+	}
+
+	float max = input[0];
+	for (i = 1; i < 10; i++) {
+		if (max < input[i]) {
+			max = input[i];
+			maxIdx = i;
+		}
+	}
+	float sum = 0;
+	for (i = 0; i < 10; i++) {
+		sum += exp(input[i] - max);
+	}
+	for (i = 0; i < 10; i++) {
+		input[i] = exp(input[i] - max) / (sum + 1e-7);
+	}
+	
+	outputs1[id] = input[maxIdx];
+	outputs2[id] = maxIdx;
 }
