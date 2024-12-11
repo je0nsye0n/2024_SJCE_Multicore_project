@@ -52,7 +52,7 @@ void build_error(cl_program program, cl_device_id device, cl_int err) {
 	};
 }
 
-void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* read_queue, cl_command_queue* cnn_queue, cl_program* program) {
+void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* read_queue, cl_command_queue* cnn_queue, cl_command_queue* cnn_queue_list, cl_program* program) {
 	cl_int err;
 
 	// Platform ID
@@ -70,9 +70,13 @@ void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* re
 	CHECK_ERROR(err);
 
 	// Create Command Queue
-	*queue = clCreateCommandQueueWithProperties(*context, device, 0, &err);
-	*read_queue = clCreateCommandQueueWithProperties(*context, device, 0, &err);
-	*cnn_queue = clCreateCommandQueueWithProperties(*context, device, 0, &err);
+	const cl_queue_properties properties[] = {
+	CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0 // 마지막에 0으로 종료
+	};
+	*queue = clCreateCommandQueueWithProperties(*context, device, properties, &err);
+	*read_queue = clCreateCommandQueueWithProperties(*context, device, properties, &err);
+	*cnn_queue = clCreateCommandQueueWithProperties(*context, device, properties, &err);
+	for (int i = 0; i < 6; i++) *(cnn_queue_list + i) = clCreateCommandQueueWithProperties(*context, device, properties, &err);
 	CHECK_ERROR(err);
 
 	// Create Program Object
@@ -92,7 +96,8 @@ void cnn_init(cl_context* context, cl_command_queue* queue, cl_command_queue* re
 
 void convolution_layer(cl_command_queue queue, cl_kernel conv_kernel,
 	cl_mem* inputs, cl_mem* outputs, cl_mem* weights, cl_mem* biases,
-	int input_dim, int output_dim, int nbyn, int batch_size)
+	int input_dim, int output_dim, int nbyn, int batch_size,
+	cl_event* before, cl_event* after, int cnt)
 {
 	cl_int err;
 
@@ -113,19 +118,20 @@ void convolution_layer(cl_command_queue queue, cl_kernel conv_kernel,
 
 	if (nbyn >= 16) {
 		size_t global_work_size[2] = { nbyn * nbyn * output_dim, batch_size };
-		err = clEnqueueNDRangeKernel(queue, conv_kernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
+		err = clEnqueueNDRangeKernel(queue, conv_kernel, 2, NULL, global_work_size, NULL, cnt, before, after);
 		CHECK_ERROR(err);
 	}
 	else {
 		size_t global_work_size[2] = { nbyn * nbyn * output_dim, batch_size };
 		size_t local_work_size[2] = { 256, 1 };
-		err = clEnqueueNDRangeKernel(queue, conv_kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+		err = clEnqueueNDRangeKernel(queue, conv_kernel, 2, NULL, global_work_size, local_work_size, cnt, before, after);
 		CHECK_ERROR(err);
 	}
 }
 
 void max_pooling_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs, cl_mem* outputs,
-	int output_dim, int nbyn, int batch_size)
+	int output_dim, int nbyn, int batch_size,
+	cl_event* before, cl_event* after, int cnt)
 {
 	cl_int err;
 
@@ -139,12 +145,13 @@ void max_pooling_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs,
 	CHECK_ERROR(err);
 
 	size_t global_work_size[2] = { nbyn * nbyn * output_dim, batch_size };
-	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
+	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, NULL, cnt, before, after);
 	CHECK_ERROR(err);
 }
 
 void fully_connected_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inputs, cl_mem* outputs, cl_mem* weights, cl_mem* biases,
-	int input_dim, int output_dim, int batch_size, int offset)
+	int input_dim, int output_dim, int batch_size, int offset,
+	cl_event* before, cl_event* after, int cnt)
 {
 	cl_int err;
 
@@ -164,7 +171,7 @@ void fully_connected_layer(cl_command_queue queue, cl_kernel kernel, cl_mem* inp
 	CHECK_ERROR(err);
 
 	size_t global_work_size[2] = { output_dim, batch_size };
-	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
+	err = clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global_work_size, NULL, cnt, before, after);
 	CHECK_ERROR(err);
 }
 
@@ -271,8 +278,9 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	cl_program program;
 	//test용
 	cl_command_queue read_queue, cnn_queue;
+	cl_command_queue cnn_queue_list[6];
 
-	cnn_init(&context, &queue, &read_queue,&cnn_queue,&program);
+	cnn_init(&context, &queue, &read_queue, &cnn_queue, cnn_queue_list, &program);
 
 	cl_kernel conv_kernel = clCreateKernel(program, "conv_kernel", &err);
 	CHECK_ERROR(err);
@@ -286,6 +294,10 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	CHECK_ERROR(err);
 
 	time_t start, end;
+
+	//추가 부분
+	cl_event event[23];
+
 	start = clock();
 
 	cl_mem wBuf[21];
@@ -336,40 +348,46 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	cl_mem imageBuf = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * 3 * 32 * 32 * batch_size, NULL, &err);
 	CHECK_ERROR(err);
 
-
 	// run network
+// 레이어 간 통신과 계산의 중첩을 구현한 코드
 	for (int i = 0; i < num_of_image; i += batch_size) {
 		int current_batch_size = (i + batch_size > num_of_image) ? (num_of_image - i) : batch_size;
-		err = clEnqueueWriteBuffer(read_queue, imageBuf, CL_TRUE, 0, sizeof(float) * 3 * 32 * 32 * current_batch_size, images + i * 32 * 32 * 3, 0, NULL, NULL);
+		if (i == 0) err = clEnqueueWriteBuffer(read_queue, imageBuf, CL_FALSE, 0, sizeof(float) * 3 * 32 * 32 * current_batch_size, images + i * 32 * 32 * 3, 0, NULL, event);
+		else {
+			err = clEnqueueWriteBuffer(read_queue, imageBuf, CL_FALSE, 0, sizeof(float) * 3 * 32 * 32 * current_batch_size, images + i * 32 * 32 * 3, 1, event + 1, event);
+			clReleaseEvent(event[1]);
+		}
 		CHECK_ERROR(err);
 
-		convolution_layer(cnn_queue, conv_kernel, &imageBuf, &layerBuf[0], &wBuf[0], &bBuf[0], INPUT_DIM[0], OUTPUT_DIM[0], NBYN[0], current_batch_size);
-		convolution_layer(cnn_queue, conv_kernel, &layerBuf[0], &layerBuf[1], &wBuf[1], &bBuf[1], INPUT_DIM[1], OUTPUT_DIM[1], NBYN[1], current_batch_size);
-		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[1], &layerBuf[2], INPUT_DIM[2], NBYN[2], current_batch_size);
+		convolution_layer(cnn_queue, conv_kernel, &imageBuf, &layerBuf[0], &wBuf[0], &bBuf[0], INPUT_DIM[0], OUTPUT_DIM[0], NBYN[0], current_batch_size, event, NULL, 1);
+		convolution_layer(cnn_queue, conv_kernel, &layerBuf[0], &layerBuf[1], &wBuf[1], &bBuf[1], INPUT_DIM[1], OUTPUT_DIM[1], NBYN[1], current_batch_size, NULL, NULL, 0);
+		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[1], &layerBuf[2], INPUT_DIM[2], NBYN[2], current_batch_size, NULL, event + 1, 0);
+		clReleaseEvent(event[0]);
 
-		convolution_layer(cnn_queue, conv_kernel, &layerBuf[2], &layerBuf[3], &wBuf[3], &bBuf[3], INPUT_DIM[3], OUTPUT_DIM[3], NBYN[3], current_batch_size);
-		convolution_layer(cnn_queue, conv_kernel, &layerBuf[3], &layerBuf[4], &wBuf[4], &bBuf[4], INPUT_DIM[4], OUTPUT_DIM[4], NBYN[4], current_batch_size);
-		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[4], &layerBuf[5], INPUT_DIM[5], NBYN[5], current_batch_size);
+		convolution_layer(cnn_queue, conv_kernel, &layerBuf[2], &layerBuf[3], &wBuf[3], &bBuf[3], INPUT_DIM[3], OUTPUT_DIM[3], NBYN[3], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_kernel, &layerBuf[3], &layerBuf[4], &wBuf[4], &bBuf[4], INPUT_DIM[4], OUTPUT_DIM[4], NBYN[4], current_batch_size, NULL, NULL, 0);
+		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[4], &layerBuf[5], INPUT_DIM[5], NBYN[5], current_batch_size, NULL, event + 2, 0);
 
-		convolution_layer(cnn_queue, conv_kernel, &layerBuf[5], &layerBuf[6], &wBuf[6], &bBuf[6], INPUT_DIM[6], OUTPUT_DIM[6], NBYN[6], current_batch_size);
-		convolution_layer(cnn_queue, conv_kernel, &layerBuf[6], &layerBuf[7], &wBuf[7], &bBuf[7], INPUT_DIM[7], OUTPUT_DIM[7], NBYN[7], current_batch_size);
-		convolution_layer(cnn_queue, conv_kernel, &layerBuf[7], &layerBuf[8], &wBuf[8], &bBuf[8], INPUT_DIM[8], OUTPUT_DIM[8], NBYN[8], current_batch_size);
-		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[8], &layerBuf[9], INPUT_DIM[9], NBYN[9], current_batch_size);
+		convolution_layer(cnn_queue, conv_kernel, &layerBuf[5], &layerBuf[6], &wBuf[6], &bBuf[6], INPUT_DIM[6], OUTPUT_DIM[6], NBYN[6], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_kernel, &layerBuf[6], &layerBuf[7], &wBuf[7], &bBuf[7], INPUT_DIM[7], OUTPUT_DIM[7], NBYN[7], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_kernel, &layerBuf[7], &layerBuf[8], &wBuf[8], &bBuf[8], INPUT_DIM[8], OUTPUT_DIM[8], NBYN[8], current_batch_size, NULL, NULL, 0);
+		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[8], &layerBuf[9], INPUT_DIM[9], NBYN[9], current_batch_size, NULL, event + 3, 0);
 
-		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[9], &layerBuf[10], &wBuf[10], &bBuf[10], INPUT_DIM[10], OUTPUT_DIM[10], NBYN[10], current_batch_size);
-		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[10], &layerBuf[11], &wBuf[11], &bBuf[11], INPUT_DIM[11], OUTPUT_DIM[11], NBYN[11], current_batch_size);
-		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[11], &layerBuf[12], &wBuf[12], &bBuf[12], INPUT_DIM[12], OUTPUT_DIM[12], NBYN[12], current_batch_size);
-		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[12], &layerBuf[13], INPUT_DIM[13], NBYN[13], current_batch_size);
+		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[9], &layerBuf[10], &wBuf[10], &bBuf[10], INPUT_DIM[10], OUTPUT_DIM[10], NBYN[10], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[10], &layerBuf[11], &wBuf[11], &bBuf[11], INPUT_DIM[11], OUTPUT_DIM[11], NBYN[11], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[11], &layerBuf[12], &wBuf[12], &bBuf[12], INPUT_DIM[12], OUTPUT_DIM[12], NBYN[12], current_batch_size, NULL, NULL, 0);
+		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[12], &layerBuf[13], INPUT_DIM[13], NBYN[13], current_batch_size, NULL, event + 4, 0);
 
-		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[13], &layerBuf[14], &wBuf[14], &bBuf[14], INPUT_DIM[14], OUTPUT_DIM[14], NBYN[14], current_batch_size);
-		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[14], &layerBuf[15], &wBuf[15], &bBuf[15], INPUT_DIM[15], OUTPUT_DIM[15], NBYN[15], current_batch_size);
-		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[15], &layerBuf[16], &wBuf[16], &bBuf[16], INPUT_DIM[16], OUTPUT_DIM[16], NBYN[16], current_batch_size);
-		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[16], &layerBuf[17], INPUT_DIM[17], NBYN[17], current_batch_size);
+		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[13], &layerBuf[14], &wBuf[14], &bBuf[14], INPUT_DIM[14], OUTPUT_DIM[14], NBYN[14], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[14], &layerBuf[15], &wBuf[15], &bBuf[15], INPUT_DIM[15], OUTPUT_DIM[15], NBYN[15], current_batch_size, NULL, NULL, 0);
+		convolution_layer(cnn_queue, conv_tile_kernel, &layerBuf[15], &layerBuf[16], &wBuf[16], &bBuf[16], INPUT_DIM[16], OUTPUT_DIM[16], NBYN[16], current_batch_size, NULL, NULL, 0);
+		max_pooling_layer(cnn_queue, pooling_kernel, &layerBuf[16], &layerBuf[17], INPUT_DIM[17], NBYN[17], current_batch_size, NULL, event + 5, 0);
 
-		fully_connected_layer(cnn_queue, fc_kernel, &layerBuf[17], &layerBuf[18], &wBuf[18], &bBuf[18], INPUT_DIM[18], OUTPUT_DIM[18], current_batch_size, 0);
-		fully_connected_layer(cnn_queue, fc_kernel, &layerBuf[18], &layerBuf[19], &wBuf[19], &bBuf[19], INPUT_DIM[19], OUTPUT_DIM[19], current_batch_size, 0);
-		fully_connected_layer(cnn_queue, fc_kernel, &layerBuf[19], &layerBuf[20], &wBuf[20], &bBuf[20], INPUT_DIM[20], OUTPUT_DIM[20], current_batch_size, i);
+		fully_connected_layer(cnn_queue, fc_kernel, &layerBuf[17], &layerBuf[18], &wBuf[18], &bBuf[18], INPUT_DIM[18], OUTPUT_DIM[18], current_batch_size, 0, NULL, NULL, 0);
+		fully_connected_layer(cnn_queue, fc_kernel, &layerBuf[18], &layerBuf[19], &wBuf[19], &bBuf[19], INPUT_DIM[19], OUTPUT_DIM[19], current_batch_size, 0, NULL, NULL, 0);
+		fully_connected_layer(cnn_queue, fc_kernel, &layerBuf[19], &layerBuf[20], &wBuf[20], &bBuf[20], INPUT_DIM[20], OUTPUT_DIM[20], current_batch_size, i, NULL, NULL, 0);
 	}
+
 
 	cl_mem tempBuf2 = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * 3000, NULL, &err);
 	CHECK_ERROR(err);
@@ -400,7 +418,7 @@ void cnn(float* images, float* network, int* labels, float* confidences, int num
 	}
 	for (int i = 0; i < 17; ++i) {
 		if (i == 2 || i == 5 || i == 9 || i == 13) i++;    // pooling layer has no weights and biases
-		err = clReleaseMemObject(wBuf[i]);	
+		err = clReleaseMemObject(wBuf[i]);
 		CHECK_ERROR(err);
 		err = clReleaseMemObject(bBuf[i]);
 		CHECK_ERROR(err);
